@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="manifest.json">
+<title>Site Visit Manager</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f7fb;color:#172033}
+header{background:#2563eb;color:white;padding:20px 18px 18px;position:sticky;top:0;z-index:5}
+h1{margin:0;font-size:23px}.sub{opacity:.88;font-size:13px;margin-top:3px}
+main{max-width:720px;margin:auto;padding:16px}
+.card{background:white;border-radius:16px;padding:15px;margin-bottom:14px;box-shadow:0 2px 10px #0000000d}
+input,button{font:inherit}input[type=text],input[type=date]{width:100%;padding:12px;border:1px solid #d6dbe5;border-radius:10px;background:white}
+.row{display:flex;gap:9px}.row>*{flex:1}.btn{border:0;border-radius:10px;padding:11px 14px;font-weight:650;cursor:pointer}.primary{background:#2563eb;color:#fff}.secondary{background:#eef2ff;color:#1e40af}.danger{background:#fee2e2;color:#b91c1c}.muted{color:#64748b;font-size:13px}
+.stats{display:flex;gap:10px}.stat{flex:1;background:#eff6ff;border-radius:12px;padding:12px}.stat b{display:block;font-size:22px}.company{padding:13px 2px;border-bottom:1px solid #edf0f5;display:flex;justify-content:space-between;align-items:center;cursor:pointer}.company:last-child{border-bottom:0}
+.company strong{font-size:15px}.badge{font-size:12px;background:#e0e7ff;color:#3730a3;padding:4px 8px;border-radius:999px}
+.hidden{display:none}.suggestions{position:absolute;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:10px;margin-top:4px;z-index:10;overflow:hidden}.suggestions div{padding:11px;cursor:pointer}.suggestions div:hover{background:#f1f5f9}.relative{position:relative}
+.history-item{padding:12px 0;border-bottom:1px solid #edf0f5}.history-item:last-child{border-bottom:0}.date{font-weight:700}.remark{font-size:13px;color:#64748b;margin-top:4px}.actions{margin-top:8px;display:flex;gap:7px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap}.toolbar .btn{flex:1;min-width:120px}
+.empty{text-align:center;padding:28px 10px;color:#64748b}
+label{font-size:13px;font-weight:650;display:block;margin:10px 0 5px}
+footer{text-align:center;color:#94a3b8;font-size:12px;padding:15px}
+</style>
+</head>
+<body>
+<header><h1>Site Visit Manager</h1><div class="sub">Keep every site visit history in one place</div></header>
+<main>
+<section class="card">
+  <div class="stats">
+    <div class="stat"><span class="muted">Companies</span><b id="companyCount">0</b></div>
+    <div class="stat"><span class="muted">Total Visits</span><b id="visitCount">0</b></div>
+  </div>
+</section>
+
+<section class="card">
+  <h3 id="formTitle" style="margin-top:0">Add Site Visit</h3>
+  <div class="relative">
+    <label>Company Name</label>
+    <input id="companyInput" type="text" placeholder="e.g. ABC Industries" autocomplete="off">
+    <div id="suggestions" class="suggestions hidden"></div>
+  </div>
+  <label>Visit Date</label>
+  <input id="dateInput" type="date">
+  <label>Remark (optional)</label>
+  <input id="remarkInput" type="text" placeholder="e.g. Inspection / Meeting">
+  <div class="row" style="margin-top:12px">
+    <button class="btn primary" id="saveBtn">Save Visit</button>
+    <button class="btn secondary hidden" id="cancelBtn">Cancel Edit</button>
+  </div>
+</section>
+
+<section class="card">
+  <label style="margin-top:0">Search Company</label>
+  <input id="searchInput" type="text" placeholder="Type company name...">
+  <div class="row">
+    <div><label>From Date</label><input id="fromDate" type="date"></div>
+    <div><label>To Date</label><input id="toDate" type="date"></div>
+  </div>
+  <div class="toolbar" style="margin-top:10px">
+    <button class="btn secondary" id="clearFilter">Clear Filters</button>
+  </div>
+</section>
+
+<section class="card">
+  <h3 style="margin-top:0">Companies</h3>
+  <div id="companyList"></div>
+</section>
+
+<section class="card hidden" id="historyCard">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+    <div><h3 id="historyTitle" style="margin:0">History</h3><div id="historyCount" class="muted"></div></div>
+    <button class="btn secondary" id="closeHistory">Close</button>
+  </div>
+  <div id="historyList"></div>
+</section>
+
+<section class="card">
+  <h3 style="margin-top:0">Backup & Restore</h3>
+  <div class="toolbar">
+    <button class="btn secondary" id="backupBtn">Export Backup</button>
+    <button class="btn secondary" id="restoreBtn">Import Backup</button>
+    <input id="restoreInput" type="file" accept=".json,application/json" class="hidden">
+  </div>
+  <p class="muted">Your records are stored on this device. Export a backup regularly so you can restore them on another device.</p>
+</section>
+<footer>Works offline after the app is installed/opened once. No account required.</footer>
+</main>
+<script>
+const KEY="site_visit_manager_v1";
+let records=JSON.parse(localStorage.getItem(KEY)||"[]");
+let editingId=null, selectedCompany=null;
+
+const $=id=>document.getElementById(id);
+$("dateInput").value=new Date().toISOString().slice(0,10);
+
+function saveData(){localStorage.setItem(KEY,JSON.stringify(records)); render(); if(selectedCompany) showHistory(selectedCompany);}
+function normalize(s){return s.trim().replace(/\s+/g," ").toLowerCase();}
+function companies(){
+  const m=new Map();
+  records.forEach(r=>{const k=normalize(r.company); if(!m.has(k))m.set(k,r.company.trim())});
+  return [...m.values()].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:"base"}));
+}
+function render(){
+  const cs=companies();
+  $("companyCount").textContent=cs.length;
+  $("visitCount").textContent=records.length;
+  const q=normalize($("searchInput").value);
+  const from=$("fromDate").value, to=$("toDate").value;
+  const filtered=cs.filter(c=>{
+    if(q && !normalize(c).includes(q))return false;
+    const rs=records.filter(r=>normalize(r.company)===normalize(c) && (!from||r.date>=from) && (!to||r.date<=to));
+    return (!from&&!to)||rs.length>0;
+  });
+  $("companyList").innerHTML=filtered.length?filtered.map(c=>{
+    const all=records.filter(r=>normalize(r.company)===normalize(c));
+    const shown=all.filter(r=>(!from||r.date>=from)&&(!to||r.date<=to));
+    const last=[...all].sort((a,b)=>b.date.localeCompare(a.date))[0];
+    return `<div class="company" data-company="${encodeURIComponent(c)}">
+      <div><strong>${esc(c)}</strong><div class="muted">Last visited: ${fmt(last.date)}</div></div>
+      <span class="badge">${shown.length}${(from||to)?" / "+all.length:""} visits</span>
+    </div>`;
+  }).join(""):`<div class="empty">No companies found.</div>`;
+  document.querySelectorAll(".company").forEach(x=>x.onclick=()=>showHistory(decodeURIComponent(x.dataset.company)));
+}
+function fmt(d){if(!d)return"-";const [y,m,day]=d.split("-");return `${day}-${m}-${y}`;}
+function esc(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+
+$("companyInput").addEventListener("input",()=>{
+ const q=normalize($("companyInput").value);
+ if(!q){$("suggestions").classList.add("hidden");return}
+ const list=companies().filter(c=>normalize(c).includes(q)).slice(0,8);
+ $("suggestions").innerHTML=list.map(c=>`<div data-c="${encodeURIComponent(c)}">${esc(c)}</div>`).join("");
+ $("suggestions").classList.toggle("hidden",list.length===0);
+ document.querySelectorAll("#suggestions div").forEach(x=>x.onclick=()=>{$("companyInput").value=decodeURIComponent(x.dataset.c);$("suggestions").classList.add("hidden");});
+});
+document.addEventListener("click",e=>{if(!e.target.closest(".relative"))$("suggestions").classList.add("hidden")});
+
+$("saveBtn").onclick=()=>{
+ const company=$("companyInput").value.trim(), date=$("dateInput").value, remark=$("remarkInput").value.trim();
+ if(!company||!date){alert("Please enter company name and visit date.");return}
+ if(editingId){
+   const r=records.find(x=>x.id===editingId); if(r){r.company=company;r.date=date;r.remark=remark;}
+ }else records.push({id:crypto.randomUUID(),company,date,remark,createdAt:Date.now()});
+ resetForm(); saveData();
+};
+function resetForm(){editingId=null;$("formTitle").textContent="Add Site Visit";$("saveBtn").textContent="Save Visit";$("cancelBtn").classList.add("hidden");$("companyInput").value="";$("dateInput").value=new Date().toISOString().slice(0,10);$("remarkInput").value="";}
+$("cancelBtn").onclick=resetForm;
+
+function showHistory(c){
+ selectedCompany=c;$("historyCard").classList.remove("hidden");$("historyTitle").textContent=c;
+ const from=$("fromDate").value,to=$("toDate").value;
+ const rs=records.filter(r=>normalize(r.company)===normalize(c)&&(!from||r.date>=from)&&(!to||r.date<=to)).sort((a,b)=>b.date.localeCompare(a.date));
+ $("historyCount").textContent=`${rs.length} visit${rs.length===1?"":"s"}${(from||to)?" in selected date range":""}`;
+ $("historyList").innerHTML=rs.length?rs.map(r=>`<div class="history-item"><div class="date">${fmt(r.date)}</div>${r.remark?`<div class="remark">${esc(r.remark)}</div>`:""}<div class="actions"><button class="btn secondary" onclick="editVisit('${r.id}')">Edit</button><button class="btn danger" onclick="deleteVisit('${r.id}')">Delete</button></div></div>`).join(""):`<div class="empty">No visits in this date range.</div>`;
+}
+window.editVisit=id=>{
+ const r=records.find(x=>x.id===id);if(!r)return;
+ editingId=id;$("formTitle").textContent="Edit Site Visit";$("saveBtn").textContent="Update Visit";$("cancelBtn").classList.remove("hidden");
+ $("companyInput").value=r.company;$("dateInput").value=r.date;$("remarkInput").value=r.remark||"";
+ window.scrollTo({top:0,behavior:"smooth"});
+};
+window.deleteVisit=id=>{
+ const r=records.find(x=>x.id===id);if(!r)return;
+ if(confirm(`Delete visit for ${r.company} on ${fmt(r.date)}?`)){records=records.filter(x=>x.id!==id);saveData();}
+};
+$("closeHistory").onclick=()=>{$("historyCard").classList.add("hidden");selectedCompany=null};
+["searchInput","fromDate","toDate"].forEach(id=>$(id).addEventListener("input",()=>{render();if(selectedCompany)showHistory(selectedCompany)}));
+$("clearFilter").onclick=()=>{$("searchInput").value="";$("fromDate").value="";$("toDate").value="";render();if(selectedCompany)showHistory(selectedCompany)};
+
+$("backupBtn").onclick=()=>{
+ const blob=new Blob([JSON.stringify({app:"Site Visit Manager",version:1,exportedAt:new Date().toISOString(),records},null,2)],{type:"application/json"});
+ const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`site-visit-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href);
+};
+$("restoreBtn").onclick=()=>$("restoreInput").click();
+$("restoreInput").onchange=async e=>{
+ const f=e.target.files[0];if(!f)return;
+ try{
+   const data=JSON.parse(await f.text());
+   if(!Array.isArray(data.records))throw Error();
+   if(confirm(`Restore ${data.records.length} visits? This will replace current records.`)){
+     records=data.records.filter(r=>r&&r.company&&r.date).map(r=>({id:r.id||crypto.randomUUID(),company:String(r.company),date:String(r.date),remark:String(r.remark||"")),createdAt:r.createdAt||Date.now()}));
+     saveData();alert("Backup restored successfully.");
+   }
+ }catch{alert("Invalid backup file.");}
+ e.target.value="";
+};
+if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js"));
+render();
+</script>
+</body></html>
